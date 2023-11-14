@@ -50,6 +50,11 @@
 
 #define UART_INV_MASK (UART_INV_TX | UART_INV_RX | UART_INV_RTS | UART_INV_CTS)
 
+// For compatibility with ESP-IDF < 5.3
+#ifndef UART_HW_FIFO_LEN
+#define UART_HW_FIFO_LEN(uart_num) UART_FIFO_LEN
+#endif
+
 typedef struct _machine_uart_obj_t {
     mp_obj_base_t base;
     uart_port_t uart_num;
@@ -306,7 +311,8 @@ STATIC void mp_machine_uart_init_helper(machine_uart_obj_t *self, size_t n_args,
         }
         self->flowcontrol = args[ARG_flow].u_int;
     }
-    check_esp_err(uart_set_hw_flow_ctrl(self->uart_num, self->flowcontrol, UART_FIFO_LEN - UART_FIFO_LEN / 4));
+    const unsigned int fifo_len = UART_HW_FIFO_LEN(self->uart_num);
+    check_esp_err(uart_set_hw_flow_ctrl(self->uart_num, self->flowcontrol, fifo_len - fifo_len / 4));
 }
 
 STATIC mp_obj_t mp_machine_uart_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
