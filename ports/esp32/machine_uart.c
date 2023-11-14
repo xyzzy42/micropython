@@ -29,6 +29,7 @@
 
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
+#include "soc/uart_periph.h"
 
 #include "py/runtime.h"
 #include "py/stream.h"
@@ -341,6 +342,8 @@ STATIC mp_obj_t mp_machine_uart_make_new(const mp_obj_type_t *type, size_t n_arg
     self->bits = 8;
     self->parity = 0;
     self->stop = 1;
+    self->rx = UART_PIN_NO_CHANGE;
+    self->tx = UART_PIN_NO_CHANGE;
     self->rts = UART_PIN_NO_CHANGE;
     self->cts = UART_PIN_NO_CHANGE;
     self->txbuf = 256;
@@ -350,28 +353,15 @@ STATIC mp_obj_t mp_machine_uart_make_new(const mp_obj_type_t *type, size_t n_arg
     self->invert = 0;
     self->flowcontrol = 0;
 
-    switch (uart_num) {
-        case UART_NUM_0:
-            self->rx = UART_PIN_NO_CHANGE; // GPIO 3
-            self->tx = UART_PIN_NO_CHANGE; // GPIO 1
-            break;
-        case UART_NUM_1:
-            self->rx = 9;
-            self->tx = 10;
-            break;
-        #if SOC_UART_NUM > 2
-        case UART_NUM_2:
-            self->rx = 16;
-            self->tx = 17;
-            break;
-        #endif
-    }
-
     #if MICROPY_HW_ENABLE_UART_REPL
     // Only reset the driver if it's not the REPL UART.
     if (uart_num != MICROPY_HW_UART_REPL)
     #endif
     {
+        // Start with default pins unless this it the REPL
+        self->rx = uart_periph_signal[uart_num].pins[SOC_UART_RX_PIN_IDX].default_gpio;
+        self->tx = uart_periph_signal[uart_num].pins[SOC_UART_TX_PIN_IDX].default_gpio;
+
         // Remove any existing configuration
         check_esp_err(uart_driver_delete(self->uart_num));
 
