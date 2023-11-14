@@ -40,7 +40,7 @@
 #endif
 
 #ifndef MICROPY_HW_UART_REPL_BAUD
-#define MICROPY_HW_UART_REPL_BAUD (115200)
+#define MICROPY_HW_UART_REPL_BAUD (CONFIG_CONSOLE_UART_BAUDRATE)
 #endif
 
 void uart_stdout_init(void);
