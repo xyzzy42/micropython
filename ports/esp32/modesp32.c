@@ -34,6 +34,7 @@
 #include "driver/adc.h"
 #include "esp_heap_caps.h"
 #include "multi_heap.h"
+#include "esp_pm.h"
 
 #include "py/nlr.h"
 #include "py/obj.h"
@@ -192,6 +193,129 @@ STATIC mp_obj_t esp32_idf_heap_info(const mp_obj_t cap_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_idf_heap_info_obj, esp32_idf_heap_info);
 
+#if CONFIG_PM_ENABLE
+
+STATIC mp_obj_t esp32_pm_dump_locks(void) {
+    esp_err_t err = esp_pm_dump_locks(stdout);
+    if (err != ESP_OK) {
+         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Error 0x%04x"), err);
+    }
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(esp32_pm_dump_locks_obj, esp32_pm_dump_locks);
+
+typedef struct _esp_pm_lock_obj_t {
+    mp_obj_base_t base;
+    mp_obj_t name;
+    esp_pm_lock_handle_t lock;
+} esp32_pm_lock_obj_t;
+
+STATIC void esp32_pm_lock_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
+    (void)kind;
+    esp32_pm_lock_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_printf(print, "Pmlock(%8x", self->lock);
+    if (self->name != mp_const_none) {
+        mp_printf(print, ", \"%s\"", mp_obj_str_get_str(self->name));
+    }
+    mp_print_str(print, ")");
+}
+
+STATIC mp_obj_t esp32_pm_lock_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 1, 2, false);
+
+    const int lock_type = MP_OBJ_SMALL_INT_VALUE(args[0]);
+    const char *name = n_args > 1 ? mp_obj_str_get_str(args[1]) : NULL;
+
+#define ESP_PM_LOCK_MAX 3
+    if ((unsigned)lock_type >= ESP_PM_LOCK_MAX) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid lock type"));
+    }
+
+    esp_pm_lock_handle_t lock;
+    check_esp_err(esp_pm_lock_create(lock_type, 0, name, &lock));
+
+    esp32_pm_lock_obj_t *pm_lock = m_new_obj_with_finaliser(esp32_pm_lock_obj_t);
+    pm_lock->base.type = type;
+    pm_lock->lock = lock;
+    pm_lock->name = n_args > 1 ? args[1] : mp_const_none;
+
+    return MP_OBJ_FROM_PTR(pm_lock);
+}
+
+STATIC mp_obj_t esp32_pm_lock_acquire(mp_obj_t lock_in) {
+    const esp32_pm_lock_obj_t *pm_lock = MP_OBJ_TO_PTR(lock_in);
+    esp_err_t err;
+
+    err = esp_pm_lock_acquire(pm_lock->lock);
+    if (err != ESP_OK) {
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Error 0x%04x"), err);
+    }
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_pm_lock_acquire_obj, esp32_pm_lock_acquire);
+
+STATIC mp_obj_t esp32_pm_lock_release(mp_obj_t lock_in) {
+    const esp32_pm_lock_obj_t *pm_lock = MP_OBJ_TO_PTR(lock_in);
+    esp_err_t err;
+
+    err = esp_pm_lock_release(pm_lock->lock);
+    if (err != ESP_OK) {
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Error 0x%04x"), err);
+    }
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_pm_lock_release_obj, esp32_pm_lock_release);
+
+STATIC mp_obj_t esp32_pm_lock_delete(mp_obj_t lock_in) {
+    esp32_pm_lock_obj_t *pm_lock = MP_OBJ_TO_PTR(lock_in);
+
+    if (pm_lock->lock) {
+        // Allow deleting acquired lock by releasing it first
+        esp_pm_lock_release(pm_lock->lock);
+
+        check_esp_err(esp_pm_lock_delete(pm_lock->lock));
+        pm_lock->lock = 0;
+    }
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_pm_lock_delete_obj, esp32_pm_lock_delete);
+
+STATIC mp_obj_t esp32_pm_lock___exit__(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    return esp32_pm_lock_release(args[0]);
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(esp32_pm_lock___exit___obj, 4, 4, esp32_pm_lock___exit__);
+
+STATIC mp_obj_t esp32_pm_lock___enter__(mp_obj_t lock_in) {
+    esp32_pm_lock_acquire(lock_in);
+    return lock_in;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(esp32_pm_lock___enter___obj, esp32_pm_lock___enter__);
+
+
+STATIC const mp_rom_map_elem_t esp32_pm_lock_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&esp32_pm_lock_delete_obj) },
+    { MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&esp32_pm_lock___exit___obj) },
+    { MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&esp32_pm_lock___enter___obj) },
+    { MP_ROM_QSTR(MP_QSTR_acquire), MP_ROM_PTR(&esp32_pm_lock_acquire_obj) },
+    { MP_ROM_QSTR(MP_QSTR_release), MP_ROM_PTR(&esp32_pm_lock_release_obj) },
+};
+STATIC MP_DEFINE_CONST_DICT(esp32_pm_lock_locals_dict, esp32_pm_lock_locals_dict_table);
+
+STATIC MP_DEFINE_CONST_OBJ_TYPE(
+    esp32_pm_lock_type,
+    MP_QSTR_Pmlock,
+    MP_TYPE_FLAG_NONE,
+    make_new, esp32_pm_lock_make_new,
+    print, esp32_pm_lock_print,
+    locals_dict, &esp32_pm_lock_locals_dict
+    );
+
+#endif // CONFIG_PM_ENABLE
+
 STATIC const mp_rom_map_elem_t esp32_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_esp32) },
 
@@ -204,6 +328,14 @@ STATIC const mp_rom_map_elem_t esp32_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_raw_temperature), MP_ROM_PTR(&esp32_raw_temperature_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_idf_heap_info), MP_ROM_PTR(&esp32_idf_heap_info_obj) },
+
+    #if CONFIG_PM_ENABLE
+    { MP_ROM_QSTR(MP_QSTR_pm_dump_locks), MP_ROM_PTR(&esp32_pm_dump_locks_obj) },
+    { MP_OBJ_NEW_QSTR(MP_QSTR_Pmlock), (mp_obj_t)&esp32_pm_lock_type },
+    { MP_ROM_QSTR(MP_QSTR_PM_CPU_FREQ_MAX), MP_ROM_INT(ESP_PM_CPU_FREQ_MAX) },
+    { MP_ROM_QSTR(MP_QSTR_PM_APB_FREQ_MAX), MP_ROM_INT(ESP_PM_APB_FREQ_MAX) },
+    { MP_ROM_QSTR(MP_QSTR_PM_NO_LIGHTSLEEP), MP_ROM_INT(ESP_PM_NO_LIGHT_SLEEP) },
+    #endif
 
     { MP_ROM_QSTR(MP_QSTR_NVS), MP_ROM_PTR(&esp32_nvs_type) },
     { MP_ROM_QSTR(MP_QSTR_Partition), MP_ROM_PTR(&esp32_partition_type) },
