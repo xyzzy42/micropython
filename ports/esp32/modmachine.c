@@ -78,15 +78,7 @@ STATIC mp_obj_t machine_freq(size_t n_args, const mp_obj_t *args) {
             mp_raise_ValueError(MP_ERROR_TEXT("frequency must be 20MHz, 40MHz, 80Mhz, 160MHz or 240MHz"));
             #endif
         }
-        #if CONFIG_IDF_TARGET_ESP32
-        esp_pm_config_esp32_t pm;
-        #elif CONFIG_IDF_TARGET_ESP32C3
-        esp_pm_config_esp32c3_t pm;
-        #elif CONFIG_IDF_TARGET_ESP32S2
-        esp_pm_config_esp32s2_t pm;
-        #elif CONFIG_IDF_TARGET_ESP32S3
-        esp_pm_config_esp32s3_t pm;
-        #endif
+        esp_pm_config_t pm;
         pm.max_freq_mhz = freq;
         pm.min_freq_mhz = freq;
         pm.light_sleep_enable = false;
