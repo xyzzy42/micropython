@@ -140,6 +140,7 @@ STATIC void machine_bitstream_high_low_rmt(mp_hal_pin_obj_t pin, uint32_t *timin
     // Use 40MHz clock (although 2MHz would probably be sufficient).
     config.clk_div = 2;
 
+    config.flags |= RMT_CHANNEL_FLAGS_AWARE_DFS;
     // Install the driver on this channel & pin.
     check_esp_err(rmt_config(&config));
     check_esp_err(rmt_driver_install_core1(config.channel));
