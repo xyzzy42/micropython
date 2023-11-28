@@ -31,6 +31,7 @@
 
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
+#include "esp_sleep.h"
 #include "hal/gpio_ll.h"
 
 #include "py/runtime.h"
@@ -303,31 +304,39 @@ STATIC mp_obj_t machine_pin_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_
         mp_obj_t wake_obj = args[ARG_wake].u_obj;
 
         if ((trigger == GPIO_INTR_LOW_LEVEL || trigger == GPIO_INTR_HIGH_LEVEL) && wake_obj != mp_const_none) {
-            mp_int_t wake;
-            if (mp_obj_get_int_maybe(wake_obj, &wake)) {
-                if (wake < 2 || wake > 7) {
-                    mp_raise_ValueError(MP_ERROR_TEXT("bad wake value"));
-                }
-            } else {
+            // There is no way to turn this off!
+            mp_int_t wake = -1;
+            if (!mp_obj_get_int_maybe(wake_obj, &wake) || wake < 2 || wake > 7) {
                 mp_raise_ValueError(MP_ERROR_TEXT("bad wake value"));
             }
 
-            if (machine_rtc_config.wake_on_touch) { // not compatible
-                mp_raise_ValueError(MP_ERROR_TEXT("no resources"));
-            }
+            if (wake == 2) {
+                if (gpio_wakeup_enable(index, trigger) != ESP_OK) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("parameter error"));
+                }
+                gpio_sleep_set_direction(index, GPIO_MODE_INPUT);
+                // So it works with automatic lightsleep.
+                esp_sleep_enable_gpio_wakeup();
+                // So machine_sleep_helper() will re-enable it on manual lightsleep
+                machine_rtc_config.wake_on_gpio = true;
+            } else {
+                if (machine_rtc_config.wake_on_touch) { // not compatible
+                    mp_raise_ValueError(MP_ERROR_TEXT("no resources"));
+                }
 
-            if (!RTC_IS_VALID_EXT_PIN(index)) {
-                mp_raise_ValueError(MP_ERROR_TEXT("invalid pin for wake"));
-            }
+                if (!RTC_IS_VALID_EXT_PIN(index)) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("invalid pin for wake"));
+                }
 
-            if (machine_rtc_config.ext0_pin == -1) {
-                machine_rtc_config.ext0_pin = index;
-            } else if (machine_rtc_config.ext0_pin != index) {
-                mp_raise_ValueError(MP_ERROR_TEXT("no resources"));
-            }
+                if (machine_rtc_config.ext0_pin == -1) {
+                    machine_rtc_config.ext0_pin = index;
+                } else if (machine_rtc_config.ext0_pin != index) {
+                    mp_raise_ValueError(MP_ERROR_TEXT("no resources"));
+                }
 
-            machine_rtc_config.ext0_level = trigger == GPIO_INTR_LOW_LEVEL ? 0 : 1;
-            machine_rtc_config.ext0_wake_types = wake;
+                machine_rtc_config.ext0_level = trigger == GPIO_INTR_LOW_LEVEL ? 0 : 1;
+                machine_rtc_config.ext0_wake_types = wake;
+            }
         } else {
             if (machine_rtc_config.ext0_pin == index) {
                 machine_rtc_config.ext0_pin = -1;

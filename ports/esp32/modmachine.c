@@ -118,6 +118,11 @@ STATIC mp_obj_t machine_sleep_helper(wake_type_t wake_type, size_t n_args, const
     // First, disable any previously set wake-up source
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
 
+    if (machine_rtc_config.wake_on_gpio) {
+        // Only works for lightsleep, but there is no harm in enabling it for deepsleep
+        esp_sleep_enable_gpio_wakeup();
+    }
+
     if (expiry != 0) {
         esp_sleep_enable_timer_wakeup(((uint64_t)expiry) * 1000);
     }

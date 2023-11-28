@@ -35,6 +35,7 @@ typedef struct {
     int8_t ext0_pin;   // just the pin#, -1 == None
     bool wake_on_touch : 1;
     bool wake_on_ulp : 1;
+    bool wake_on_gpio : 1;
     bool ext0_level : 1;
     wake_type_t ext0_wake_types;
     bool ext1_level : 1;
