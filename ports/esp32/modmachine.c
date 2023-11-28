@@ -60,13 +60,22 @@ STATIC bool is_soft_reset = 0;
 int esp_clk_cpu_freq(void);
 #endif
 
-STATIC mp_obj_t machine_freq(size_t n_args, const mp_obj_t *args) {
+STATIC mp_obj_t machine_freq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     if (n_args == 0) {
         // get
         return mp_obj_new_int(esp_rom_get_cpu_ticks_per_us() * 1000000);
     } else {
         // set
-        mp_int_t freq = mp_obj_get_int(args[0]) / 1000000;
+        enum {ARG_hz, ARG_min_hz, ARG_lightsleep};
+        const mp_arg_t allowed_args[] = {
+            { MP_QSTR_hz, MP_ARG_REQUIRED | MP_ARG_INT, { .u_int = 0 } },
+            { MP_QSTR_min_hz, MP_ARG_INT, { .u_int = -1 } },
+            { MP_QSTR_lightsleep, MP_ARG_KW_ONLY | MP_ARG_BOOL, { .u_bool = false } },
+        };
+        mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+        mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+        mp_int_t freq = args[ARG_hz].u_int / 1000000;
         if (freq != 20 && freq != 40 && freq != 80 && freq != 160
             #if !CONFIG_IDF_TARGET_ESP32C3
             && freq != 240
@@ -78,10 +87,16 @@ STATIC mp_obj_t machine_freq(size_t n_args, const mp_obj_t *args) {
             mp_raise_ValueError(MP_ERROR_TEXT("frequency must be 20MHz, 40MHz, 80Mhz, 160MHz or 240MHz"));
             #endif
         }
-        esp_pm_config_t pm;
-        pm.max_freq_mhz = freq;
-        pm.min_freq_mhz = freq;
-        pm.light_sleep_enable = false;
+        mp_int_t minfreq = args[ARG_min_hz].u_int == -1 ? freq : args[ARG_min_hz].u_int / 1000000;
+        if (minfreq > freq) {
+            mp_raise_ValueError(MP_ERROR_TEXT("min_hz must be <= hz"));
+        }
+
+        esp_pm_config_t pm = {
+            .max_freq_mhz = freq,
+            .min_freq_mhz = minfreq,
+            .light_sleep_enable = args[ARG_lightsleep].u_bool,
+        };
         esp_err_t ret = esp_pm_configure(&pm);
         if (ret != ESP_OK) {
             mp_raise_ValueError(NULL);
@@ -92,7 +107,7 @@ STATIC mp_obj_t machine_freq(size_t n_args, const mp_obj_t *args) {
         return mp_const_none;
     }
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_freq_obj, 0, 1, machine_freq);
+STATIC MP_DEFINE_CONST_FUN_OBJ_KW(machine_freq_obj, 0, machine_freq);
 
 STATIC mp_obj_t machine_sleep_helper(wake_type_t wake_type, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
