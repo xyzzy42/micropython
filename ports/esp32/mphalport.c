@@ -33,6 +33,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
+#include "esp_pm.h"
 
 #include "py/obj.h"
 #include "py/objstr.h"
@@ -51,6 +52,10 @@ TaskHandle_t mp_main_task_handle;
 
 STATIC uint8_t stdin_ringbuf_array[260];
 ringbuf_t stdin_ringbuf = {stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0};
+
+#if CONFIG_PM_ENABLE // && CONSOLE_UART_WAKE_SUPPORT
+esp_pm_lock_handle_t stdin_pm_lock;
+#endif
 
 // Check the ESP-IDF error code and raise an OSError if it's not ESP_OK.
 #if MICROPY_ERROR_REPORTING <= MICROPY_ERROR_REPORTING_NORMAL
@@ -112,16 +117,51 @@ uintptr_t mp_hal_stdio_poll(uintptr_t poll_flags) {
     return ret;
 }
 
+// Time after wake before going back to sleep
+#define STDIN_WAKE_TIMEOUT_MS   (2000u)
+// Time after receiving stdin data before sleeping
+#define STDIN_ACTIVE_TIMEOUT_MS (60000u)
+
+// Convert to 1024th seconds.  Runtime math is smaller and faster this way.
+// Max timeout is ~24 days.  That should be ok.
+#define RESCALE(x)      (uint32_t)(((x) * 1000ull) >> 10)
+#define TOTICKS(x)      (((x) * (uint32_t)((configTICK_RATE_HZ * 1024ull << 16) / 1000000ull) + 65535) >> 16)
+
+STATIC uint32_t stdin_sleep_time;
+
 int mp_hal_stdin_rx_chr(void) {
+    // Initialize sleep time the on the first attempt to read from stdin.
+    // Don't include long boot-up when stdin wasn't usable.
+    if (!stdin_sleep_time) {
+        stdin_sleep_time = (esp_timer_get_time() >> 10) + RESCALE(STDIN_ACTIVE_TIMEOUT_MS);
+    }
     for (;;) {
+        xTaskNotifyStateClear(NULL);
         #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
         usb_serial_jtag_poll_rx();
         #endif
         int c = ringbuf_get(&stdin_ringbuf);
         if (c != -1) {
+            stdin_sleep_time = (esp_timer_get_time() >> 10) + RESCALE(STDIN_ACTIVE_TIMEOUT_MS);
             return c;
         }
-        MICROPY_EVENT_POLL_HOOK
+
+        // No data, sleep until we wake up or console idle
+        mp_handle_pending(true);
+        MICROPY_PY_SOCKET_EVENTS_HANDLER
+        MP_THREAD_GIL_EXIT();
+        const uint32_t now = esp_timer_get_time() >> 10;
+        if ((int32_t)(stdin_sleep_time - now) <= 0) {
+            esp_pm_lock_release(stdin_pm_lock);
+            ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
+
+            // Don't just go back to sleep before the next byte arrives
+            esp_pm_lock_acquire(stdin_pm_lock);
+            stdin_sleep_time = (esp_timer_get_time() >> 10) + RESCALE(STDIN_WAKE_TIMEOUT_MS);
+        } else {
+            ulTaskNotifyTake(pdTRUE, TOTICKS(stdin_sleep_time - now));
+        }
+        MP_THREAD_GIL_ENTER();
     }
 }
 

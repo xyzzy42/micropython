@@ -36,6 +36,9 @@
 #include <stdio.h>
 #include "driver/uart.h" // For uart_get_sclk_freq()
 #include "hal/uart_hal.h"
+#include "soc/uart_periph.h"
+#include "esp_sleep.h"
+#include "esp_pm.h"
 
 STATIC void uart_irq_handler(void *arg);
 
@@ -66,6 +69,14 @@ void uart_stdout_init(void) {
     uart_hal_rxfifo_rst(&repl_hal);
     uart_hal_txfifo_rst(&repl_hal);
 
+    // Allow wake from lightsleep on UART
+    // uart_periph_signal[uart_echo].pins[SOC_UART_XX_PIN_IDX].default_gpio
+    // No good way to get the pin id!
+    gpio_sleep_set_direction(44, GPIO_MODE_INPUT);
+    gpio_sleep_set_pull_mode(44, GPIO_FLOATING);
+    uart_hal_set_wakeup_thrd(&repl_hal, 3);
+    esp_sleep_enable_uart_wakeup(MICROPY_HW_UART_REPL);
+
     ESP_ERROR_CHECK(
         esp_intr_alloc(uart_periph_signal[MICROPY_HW_UART_REPL].irq,
             ESP_INTR_FLAG_LOWMED | ESP_INTR_FLAG_IRAM,
@@ -77,7 +88,11 @@ void uart_stdout_init(void) {
     // Enable RX interrupts
     uart_hal_set_rxfifo_full_thr(&repl_hal, RXFIFO_FULL_THR);
     uart_hal_set_rx_timeout(&repl_hal, RXFIFO_RX_TIMEOUT);
-    uart_hal_ena_intr_mask(&repl_hal, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT);
+    uart_hal_ena_intr_mask(&repl_hal, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_WAKEUP);
+
+    extern esp_pm_lock_handle_t stdin_pm_lock;
+    esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "stdin", &stdin_pm_lock);
+    esp_pm_lock_acquire(stdin_pm_lock);
 }
 
 int uart_stdout_tx_strn(const char *str, size_t len) {
@@ -104,7 +119,7 @@ STATIC void IRAM_ATTR uart_irq_handler(void *arg) {
     int len;
     uart_hal_context_t repl_hal = REPL_HAL_DEFN();
 
-    uart_hal_clr_intsts_mask(&repl_hal, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_FRAM_ERR);
+    uart_hal_clr_intsts_mask(&repl_hal, UART_INTR_RXFIFO_FULL | UART_INTR_RXFIFO_TOUT | UART_INTR_FRAM_ERR | UART_INTR_WAKEUP);
 
     len = uart_hal_get_rxfifo_len(&repl_hal);
 
@@ -118,6 +133,7 @@ STATIC void IRAM_ATTR uart_irq_handler(void *arg) {
             ringbuf_put(&stdin_ringbuf, rbuf[i]);
         }
     }
+    mp_hal_wake_main_task_from_isr();
 }
 
 #endif // MICROPY_HW_ENABLE_UART_REPL
