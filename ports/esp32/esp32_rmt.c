@@ -173,6 +173,7 @@ STATIC mp_obj_t esp32_rmt_make_new(const mp_obj_type_t *type, size_t n_args, siz
     config.clk_div = self->clock_div;
 
     check_esp_err(rmt_config(&config));
+    check_esp_err(rmt_set_source_clk(config.channel, RMT_BASECLK_XTAL));
     check_esp_err(rmt_driver_install_core1(config.channel));
 
     return MP_OBJ_FROM_PTR(self);
@@ -185,7 +186,7 @@ STATIC void esp32_rmt_print(const mp_print_t *print, mp_obj_t self_in, mp_print_
         rmt_idle_level_t idle_level;
         check_esp_err(rmt_get_idle_level(self->channel_id, &idle_output_en, &idle_level));
         mp_printf(print, "RMT(channel=%u, pin=%u, source_freq=%u, clock_div=%u, idle_level=%u)",
-            self->channel_id, self->pin, APB_CLK_FREQ, self->clock_div, idle_level);
+            self->channel_id, self->pin, XTAL_CLK_FREQ, self->clock_div, idle_level);
     } else {
         mp_printf(print, "RMT()");
     }
@@ -207,7 +208,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_rmt_deinit_obj, esp32_rmt_deinit);
 // Currently only the APB clock (80MHz) can be used but it is possible other
 // clock sources will added in the future.
 STATIC mp_obj_t esp32_rmt_source_freq(mp_obj_t self_in) {
-    return mp_obj_new_int(APB_CLK_FREQ);
+    return mp_obj_new_int(XTAL_CLK_FREQ);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_rmt_source_freq_obj, esp32_rmt_source_freq);
 
