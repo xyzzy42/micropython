@@ -136,13 +136,14 @@ STATIC void machine_pin_print(const mp_print_t *print, mp_obj_t self_in, mp_prin
 
 // pin.init(mode=None, pull=-1, *, value, drive, hold)
 STATIC mp_obj_t machine_pin_obj_init_helper(const machine_pin_obj_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    enum { ARG_mode, ARG_pull, ARG_value, ARG_drive, ARG_hold };
+    enum { ARG_mode, ARG_pull, ARG_value, ARG_drive, ARG_hold, ARG_rtcpull };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_mode, MP_ARG_OBJ, {.u_obj = mp_const_none}},
         { MP_QSTR_pull, MP_ARG_OBJ, {.u_obj = MP_OBJ_NEW_SMALL_INT(-1)}},
         { MP_QSTR_value, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL}},
         { MP_QSTR_drive, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL}},
         { MP_QSTR_hold, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL}},
+        { MP_QSTR_rtcpull, MP_ARG_BOOL, {.u_bool = false}},
     };
 
     // parse args
@@ -196,18 +197,23 @@ STATIC mp_obj_t machine_pin_obj_init_helper(const machine_pin_obj_t *self, size_
     // configure pull
     if (args[ARG_pull].u_obj != MP_OBJ_NEW_SMALL_INT(-1)) {
         int mode = 0;
+        const bool rtc = args[ARG_rtcpull].u_bool;
         if (args[ARG_pull].u_obj != mp_const_none) {
             mode = mp_obj_get_int(args[ARG_pull].u_obj);
         }
         if (mode & GPIO_PULL_DOWN) {
             gpio_pulldown_en(index);
+            if (rtc) rtc_gpio_pulldown_en(index);
         } else {
             gpio_pulldown_dis(index);
+            if (rtc) rtc_gpio_pulldown_dis(index);
         }
         if (mode & GPIO_PULL_UP) {
             gpio_pullup_en(index);
+            if (rtc) rtc_gpio_pullup_en(index);
         } else {
             gpio_pullup_dis(index);
+            if (rtc) rtc_gpio_pullup_dis(index);
         }
     }
 
